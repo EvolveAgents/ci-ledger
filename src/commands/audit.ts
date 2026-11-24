@@ -9,6 +9,7 @@ import { fakeGitHub } from "../fixtures/fake-github.js";
 import { buildWorld } from "../fixtures/synthetic.js";
 import { resolveToken } from "../github/client.js";
 import { buildMetrics } from "../metrics/index.js";
+import { renderReport } from "../report/html.js";
 import { findingsSummary } from "../report/text.js";
 
 export const DEFAULT_OUT = "ci-ledger-report";
@@ -106,7 +107,11 @@ export async function runAudit(argv: string[]): Promise<number> {
     writeFileSync(join(values.out, name), body);
     return join(values.out, name);
   };
-  const files = [write("metrics.json", `${JSON.stringify(metrics, null, 2)}\n`), write("findings.json", `${JSON.stringify(findings, null, 2)}\n`)];
+  const files = [
+    write("metrics.json", `${JSON.stringify(metrics, null, 2)}\n`),
+    write("findings.json", `${JSON.stringify(findings, null, 2)}\n`),
+    write("report.html", renderReport(metrics, findings)),
+  ];
 
   console.log(findingsSummary(findings, metrics));
   console.log(`\nWrote ${files.join(", ")}`);
