@@ -114,7 +114,7 @@ export interface WorkflowFile {
 
 export interface RepoSetup {
   requiredChecks: string[];
-  requiredChecksSource: "rulesets" | "branch-protection" | "none" | "unavailable";
+  requiredChecksSource: "rulesets" | "branch-protection" | "rulesets+branch-protection" | "none" | "unavailable";
   /** null when it could not be determined from the API. */
   mergeQueue: boolean | null;
   notes: string[];

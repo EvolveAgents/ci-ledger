@@ -107,6 +107,19 @@ test("setup reads required checks and the merge queue from rulesets", async () =
   assert.equal(setup.mergeQueue, true);
 });
 
+test("required checks are the union of rulesets and branch protection", async () => {
+  const fetch = routes({
+    "GET /repos/acme/widgets/rules/branches/main": () => [
+      { type: "required_status_checks", parameters: { required_status_checks: [{ context: "test" }] } },
+    ],
+    "GET /repos/acme/widgets/branches/main/protection/required_status_checks": () => ({ contexts: ["build"] }),
+    "POST /graphql": () => ({ data: { repository: { mergeQueue: null } } }),
+  });
+  const setup = await collectSetup(new GitHubClient({ fetch }), tmpCache(), repo);
+  assert.deepEqual(setup.requiredChecks, ["build", "test"]);
+  assert.equal(setup.requiredChecksSource, "rulesets+branch-protection");
+});
+
 test("setup falls back to branch protection and asks GraphQL about the merge queue", async () => {
   const fetch = routes({
     "GET /repos/acme/widgets/rules/branches/main": () => [],
@@ -162,7 +175,19 @@ test("billing 403 or 404 makes billing unavailable with a reason, also offline",
   const offline = await collectBilling(new GitHubClient({ fetch }), cache, "acme", window, { offline: true });
   assert.equal(offline.status, "unavailable");
   assert.match(offline.reason ?? "", /org owner/);
+  const ok = routes({ "GET /organizations/acme/settings/billing/usage": () => ({ usageItems: [] }) });
+  assert.equal((await collectBilling(new GitHubClient({ fetch: ok }), cache, "acme", window)).status, "ok");
+  assert.equal(cache.has("billing/acme-unavailable.json"), false, "a later success clears the marker");
   const user = routes({ "GET /organizations/someone/settings/billing/usage": () => status(404) });
   const missing = await collectBilling(new GitHubClient({ fetch: user }), tmpCache(), "someone", window);
   assert.match(missing.reason ?? "", /HTTP 404/);
+});
+
+test("a transient billing failure is not remembered", async () => {
+  const cache = tmpCache();
+  const fetch = routes({ "GET /organizations/acme/settings/billing/usage": () => status(422, "Unprocessable") });
+  const billing = await collectBilling(new GitHubClient({ fetch, maxRetries: 0 }), cache, "acme", { since: "2026-03-01", until: "2026-03-05" });
+  assert.equal(billing.status, "unavailable");
+  assert.match(billing.reason ?? "", /rerun to retry/);
+  assert.equal(cache.has("billing/acme-unavailable.json"), false);
 });

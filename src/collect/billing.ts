@@ -69,16 +69,20 @@ export async function collectBilling(
         const mapped = (data.usageItems ?? []).map(mapUsageItem).filter((i) => i.product.toLowerCase() === "actions");
         file = { month, final: month < currentMonth, items: mapped };
         cache.write(rel, file);
+        cache.remove(`billing/${org}-unavailable.json`);
       } catch (err) {
-        if (err instanceof GitHubError && err.status >= 400 && err.status < 500) {
-          const reason =
-            err.status === 403 || err.status === 401
-              ? `billing usage needs an org owner or billing manager token (HTTP ${err.status})`
-              : `billing usage is not available for "${org}" (HTTP ${err.status})`;
-          cache.write(`billing/${org}-unavailable.json`, { reason });
-          return { status: "unavailable", reason, org, months, items: [] };
-        }
-        throw err;
+        if (!(err instanceof GitHubError)) throw err;
+        // 401/403/404 are lasting (no access, or not an org) and are remembered for --from-cache;
+        // anything else (a rate limit that outlasted the retries, a 5xx) only affects this run.
+        const lasting = err.status === 401 || err.status === 403 || err.status === 404;
+        const reason =
+          err.status === 401 || err.status === 403
+            ? `billing usage needs an org owner or billing manager token (HTTP ${err.status})`
+            : err.status === 404
+              ? `billing usage is not available for "${org}" (HTTP 404)`
+              : `billing usage request failed (HTTP ${err.status || "network error"}); rerun to retry`;
+        if (lasting) cache.write(`billing/${org}-unavailable.json`, { reason });
+        return { status: "unavailable", reason, org, months, items: [] };
       }
     }
     items.push(...file.items);

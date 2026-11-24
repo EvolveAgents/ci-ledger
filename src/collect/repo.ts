@@ -93,37 +93,45 @@ export async function collectSetup(gh: GitHubClient, cache: Cache, repo: RepoInf
   const base = `/repos/${repo.owner}/${repo.name}`;
   const branch = encodeURIComponent(repo.defaultBranch);
   const notes: string[] = [];
-  let requiredChecks: string[] = [];
-  let source: RepoSetup["requiredChecksSource"] = "none";
   let mergeQueue: boolean | null = null;
+  let fromRulesets: string[] = [];
+  let fromProtection: string[] = [];
+  let protectionDenied = false;
 
   try {
     const rules = await gh.list<ApiRule>(`${base}/rules/branches/${branch}?per_page=100`);
     mergeQueue = rules.some((r) => r.type === "merge_queue");
-    requiredChecks = rules
+    fromRulesets = rules
       .filter((r) => r.type === "required_status_checks")
       .flatMap((r) => r.parameters?.required_status_checks?.map((c) => c.context) ?? []);
-    if (requiredChecks.length) source = "rulesets";
   } catch (err) {
     notes.push(`rulesets: ${brief(err)}`);
   }
 
-  if (source === "none") {
-    try {
-      const { data } = await gh.request<{ contexts?: string[]; checks?: Array<{ context: string }> }>(
-        `${base}/branches/${branch}/protection/required_status_checks`,
-      );
-      requiredChecks = [...(data.contexts ?? []), ...(data.checks ?? []).map((c) => c.context)];
-      if (requiredChecks.length) source = "branch-protection";
-    } catch (err) {
-      if (err instanceof GitHubError && err.status === 404) {
-        // no classic protection on this branch
-      } else {
-        source = "unavailable";
-        notes.push(`branch protection: ${brief(err)} (needs Administration: read)`);
-      }
+  // Rulesets and classic branch protection can both require checks; take the union.
+  try {
+    const { data } = await gh.request<{ contexts?: string[]; checks?: Array<{ context: string }> }>(
+      `${base}/branches/${branch}/protection/required_status_checks`,
+    );
+    fromProtection = [...(data.contexts ?? []), ...(data.checks ?? []).map((c) => c.context)];
+  } catch (err) {
+    if (!(err instanceof GitHubError && err.status === 404)) {
+      protectionDenied = true;
+      notes.push(`branch protection: ${brief(err)} (needs Administration: read)`);
     }
   }
+
+  const requiredChecks = [...fromRulesets, ...fromProtection];
+  const source: RepoSetup["requiredChecksSource"] =
+    fromRulesets.length && fromProtection.length
+      ? "rulesets+branch-protection"
+      : fromRulesets.length
+        ? "rulesets"
+        : fromProtection.length
+          ? "branch-protection"
+          : protectionDenied
+            ? "unavailable"
+            : "none";
 
   if (!mergeQueue) {
     try {
