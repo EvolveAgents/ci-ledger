@@ -1,0 +1,14 @@
+{
+  "$comment": "Per-minute list prices for GitHub-hosted runners, in USD. Edit or override with `rates` in ci-ledger.config.json. Labels are matched case-insensitively against a job's runner labels; the first entry with a matching label wins. Jobs on self-hosted runners are counted but never priced.",
+  "currency": "USD",
+  "effective": "2026-01-01",
+  "source": "https://docs.github.com/en/billing/reference/actions-runner-pricing",
+  "runners": [
+    {
+      "sku": "linux-2-core",
+      "os": "linux",
+      "perMinute": 0.006,
+      "labels": ["ubuntu-latest", "ubuntu-24.04", "ubuntu-22.04"]
+    }
+  ]
+}
