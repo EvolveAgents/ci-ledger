@@ -85,6 +85,8 @@ CI Ledger reads `GITHUB_TOKEN`, then `GH_TOKEN`, then `gh auth token`. Without a
 
 Classic tokens need the `repo` scope for private repositories.
 
+Behind an HTTPS proxy, set `NODE_USE_ENV_PROXY=1`. Node's built-in `fetch` ignores `HTTPS_PROXY` without it, and `audit` prints a hint when it sees the proxy variable alone.
+
 Billing is optional. Without it (a 403 or 404, or `--no-billing`), the audit falls back to its runtime-based estimate and labels it lower confidence in `metrics.json`, `findings.json` and on page one of the report.
 
 Some tokens and proxies block GraphQL. CI Ledger then switches to the REST timeline and says so in the notes. The REST timeline may not include merge-queue removal reasons, so conflict hotspots work best with GraphQL.
