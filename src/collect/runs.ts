@@ -101,7 +101,9 @@ export async function fetchDay(
   log: (m: string) => void = () => {},
 ): Promise<{ runs: Run[]; truncated: boolean }> {
   const whole = await fetchRange(gh, repo, day, cap);
-  if (whole.length < cap) return { runs: whole, truncated: false };
+  // The list is newest first, so a run created while paging shifts items across a page boundary
+  // and can appear twice; de-duplicate by id.
+  if (whole.length < cap) return { runs: [...new Map(whole.map((r) => [r.id, r])).values()], truncated: false };
   log(`${day}: ${whole.length}+ runs, refetching in 4-hour slices`);
   const byId = new Map<number, Run>();
   let truncated = false;

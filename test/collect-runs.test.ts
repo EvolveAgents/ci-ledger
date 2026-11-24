@@ -98,6 +98,13 @@ test("a day under the cap is fetched with one query", async () => {
   assert.deepEqual(new Set(api.calls), new Set(["2026-03-01"]));
 });
 
+test("runs repeated across pages are counted once", async () => {
+  const runs = runsOn("2026-03-01", 150, [3]);
+  const api = fakeRunsApi([...runs.slice(0, 100), runs[99]!, ...runs.slice(100)]);
+  const { runs: got } = await fetchDay(new GitHubClient({ fetch: api.fetch }), repo, "2026-03-01");
+  assert.equal(got.length, 150);
+});
+
 test("a day at the cap is refetched in 4-hour slices and de-duplicated", async () => {
   const api = fakeRunsApi(runsOn("2026-03-01", 1500, [0, 5, 10, 15, 20]), 1000);
   const gh = new GitHubClient({ fetch: api.fetch });
