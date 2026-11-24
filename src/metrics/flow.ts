@@ -51,17 +51,23 @@ export function queueEntries(ctx: Context): Entry[] {
   return out.filter((e) => e.addedAt.slice(0, 10) >= since && e.addedAt.slice(0, 10) <= until);
 }
 
-function queueStats(entries: Entry[]) {
+/**
+ * Stats for a slice of entries (a week, an agent). Kick-out rate counts only entries whose outcome is
+ * known (merged or removed). Entries per merged PR count all of that PR's entries in `all`, so a PR
+ * ejected one week and merged the next is not "merged on the first try".
+ */
+function queueStats(entries: Entry[], all: Entry[] = entries) {
   const removed = entries.filter((e) => e.outcome === "removed");
   const kicked = removed.filter((e) => !MANUAL_REASONS.has(e.reason ?? ""));
   const merged = entries.filter((e) => e.outcome === "merged");
-  const perMergedPr = [...groupBy(entries, (e) => e.pr).values()].filter((l) => l.some((e) => e.outcome === "merged")).map((l) => l.length);
+  const byPr = groupBy(all, (e) => e.pr);
+  const perMergedPr = [...new Set(merged.map((e) => e.pr))].map((pr) => byPr.get(pr)?.length ?? 1);
   return {
     entries: entries.length,
     merged: merged.length,
     removed: removed.length,
     kickOuts: kicked.length,
-    kickOutRate: rate(kicked.length, entries.length),
+    kickOutRate: rate(kicked.length, merged.length + removed.length),
     mergedPrs: perMergedPr.length,
     entriesPerMergedPr: distribution(perMergedPr),
     mergedFirstTry: perMergedPr.filter((n) => n === 1).length,
@@ -98,8 +104,8 @@ export function mergeQueueSection(ctx: Context) {
       merged: distribution(entries.filter((e) => e.outcome === "merged").map((e) => (hoursBetween(e.addedAt, e.endedAt) ?? 0) * 60), 1),
       ejected: distribution(entries.filter((e) => e.outcome === "removed").map((e) => (hoursBetween(e.addedAt, e.endedAt) ?? 0) * 60), 1),
     },
-    weekly: [...groupBy(entries, (e) => weekKey(e.addedAt))].sort(([a], [b]) => a.localeCompare(b)).map(([week, l]) => ({ week, ...queueStats(l) })),
-    byAgent: [...groupBy(entries, (e) => e.agent)].sort(([a], [b]) => a.localeCompare(b)).map(([agent, l]) => ({ agent, ...queueStats(l) })),
+    weekly: [...groupBy(entries, (e) => weekKey(e.addedAt))].sort(([a], [b]) => a.localeCompare(b)).map(([week, l]) => ({ week, ...queueStats(l, entries) })),
+    byAgent: [...groupBy(entries, (e) => e.agent)].sort(([a], [b]) => a.localeCompare(b)).map(([agent, l]) => ({ agent, ...queueStats(l, entries) })),
     conflictFiles: [...conflictFiles].map(([path, ejections]) => ({ path, ejections })).sort((a, b) => b.ejections - a.ejections || a.path.localeCompare(b.path)).slice(0, 20),
     conflictPrsWithFiles: [...conflictPrs].filter((n) => ctx.prs.get(n)?.files).length,
     conflictPrs: conflictPrs.size,
@@ -217,10 +223,22 @@ export function leadTimeSection(ctx: Context) {
   const hours = (vals: Array<number | null>) => distribution(vals.filter((v): v is number => v !== null), 1);
   const end = new Date(Math.min(ctx.now.getTime(), Date.parse(`${ctx.data.window.until}T23:59:59Z`)));
   const asOf = end.toISOString();
-  const open = ctx.data.prs.filter((p) => p.state === "open" && p.createdAt <= asOf);
+  // Open as of the window end (not as of collection), with idle time from the last activity before it.
+  const openAt = (p: PullRequest) => p.createdAt <= asOf && !(p.closedAt && p.closedAt <= asOf) && !(p.mergedAt && p.mergedAt <= asOf);
+  const lastActivity = (p: PullRequest) =>
+    [p.createdAt, ...(p.updatedAt <= asOf ? [p.updatedAt] : []), ...p.timeline.map((e) => e.at).filter((t) => t <= asOf)].reduce((a, b) => (b > a ? b : a));
+  const open = ctx.data.prs.filter(openAt);
   const days = (a: string) => (hoursBetween(a, asOf) ?? 0) / 24;
   const stale = open
-    .map((p) => ({ number: p.number, agent: ctx.agentOf.get(p.number) ?? NO_AGENT, draft: p.draft, ageDays: round(days(p.createdAt), 1), idleDays: round(days(p.updatedAt), 1), behindBy: p.behindBy ?? null }))
+    .map((p) => ({
+      number: p.number,
+      agent: ctx.agentOf.get(p.number) ?? NO_AGENT,
+      draft: p.draft,
+      ageDays: round(days(p.createdAt), 1),
+      idleDays: round(days(lastActivity(p)), 1),
+      // Behind-base counts are measured at collection time, so only for PRs still open then.
+      behindBy: p.state === "open" ? (p.behindBy ?? null) : null,
+    }))
     .filter((p) => p.idleDays >= ctx.config.staleDays)
     .sort((a, b) => b.idleDays - a.idleDays || a.number - b.number);
   return {

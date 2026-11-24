@@ -29,6 +29,9 @@ test("merge queue: entries, exits by reason, kick-outs, time in queue, first-try
   assert.ok(q.entriesPerMergedPr.mean! > 1);
   assert.ok(q.mergedFirstTryRate! > 0.3 && q.mergedFirstTryRate! < 1);
   assert.equal(q.weekly.reduce((s, w) => s + w.entries, 0), q.entries);
+  assert.equal(q.weekly.reduce((s, w) => s + w.mergedFirstTry, 0), q.mergedFirstTry, "weekly first-try merges add up");
+  assert.equal(q.weekly.reduce((s, w) => s + w.mergedPrs, 0), q.mergedPrs);
+  assert.equal(q.kickOutRate, Math.round((q.kickOuts / (q.merged + q.removed)) * 10000) / 10000);
   assert.ok(q.byAgent.some((a) => a.agent === "codex"));
   assert.ok(["src/registry.ts", "package-lock.json"].includes(q.conflictFiles[0]!.path));
 });
@@ -63,6 +66,17 @@ test("lead time stages, open-PR ages and stale PRs", async () => {
   assert.ok(l.stale.count >= 5);
   assert.ok(l.stale.behindBase >= 5);
   assert.ok(l.stale.prs[0]!.idleDays >= l.stale.prs[1]!.idleDays);
+});
+
+test("open-PR ages and stale PRs use PR state as of the window end", async () => {
+  const data = await syntheticDataset();
+  const early: Dataset = { ...data, window: { since: "2026-10-01", until: "2026-10-10" } };
+  const l = buildMetrics(early, defaultConfig(), now).leadTime;
+  assert.equal(l.asOf, "2026-10-10T23:59:59.000Z");
+  const openThen = data.prs.filter((p) => p.createdAt <= l.asOf && !(p.closedAt && p.closedAt <= l.asOf));
+  assert.equal(l.openPrAgeDays.n, openThen.length);
+  assert.ok(openThen.some((p) => p.state !== "open"), "includes PRs merged after the window");
+  assert.ok(l.stale.prs.every((p) => p.idleDays >= 14));
 });
 
 test("agents: PRs, CI minutes and rework per agent add up", async () => {
