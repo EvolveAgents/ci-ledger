@@ -74,6 +74,7 @@ export interface PullRequest {
   mergedAt: string | null;
   baseRef: string;
   headRef: string;
+  headSha: string;
   additions: number;
   deletions: number;
   author: string | null;
