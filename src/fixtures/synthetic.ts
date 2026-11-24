@@ -261,7 +261,7 @@ export function buildWorld(options: WorldOptions = {}): World {
     };
     for (let h = 0; h < heads; h++) {
       if (h > 0) {
-        at += between(1.5, 20) * 3_600_000;
+        at += chance(0.2) ? between(2, 5) * 60_000 : between(1.5, 20) * 3_600_000;
         head = sha();
         if (chance(0.3)) events.push({ type: "force_pushed", at: iso(at) });
         if (chance(0.2)) events.push({ type: "commit", at: iso(at - 60_000), sha: head, headline: `Merge branch 'main' into ${branch}` });
@@ -334,12 +334,41 @@ export function buildWorld(options: WorldOptions = {}): World {
     addRun("nightly", "schedule", "main", sha(), day + 3 * 3_600_000, { actor: "dev-c", force: d === 11 ? 360 : undefined });
     if (d % 3 === 0) addRun("dependabot", "dynamic", "main", sha(), day + 6 * 3_600_000, { actor: "dependabot[bot]" });
   }
+  cancelSuperseded(runs, "E2E");
   const inWindow = runs.filter((x) => Date.parse(x.created_at) >= start && Date.parse(x.created_at) < end);
   inWindow.sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id - b.id);
   return { repo: { id: repoId, owner: "example-org", name: "widgets", private: true, default_branch: "main" },
     since, until: iso(end - 1000).slice(0, 10), now: new Date(end + 3_600_000),
     workflows: Object.entries(WORKFLOW_FILES).map(([path, content]) => ({ path, content })),
     requiredChecks: ["build", "e2e", "test"], mergeQueue: true, runs: inWindow, prs, billing: billingFor(inWindow, start, days) };
+}
+
+/** Models `concurrency: cancel-in-progress` for one workflow: a newer PR run cancels the one still running. */
+function cancelSuperseded(runs: WRun[], workflow: string): void {
+  const byBranch = new Map<string, WRun[]>();
+  for (const r of runs) {
+    if (r.name !== workflow || r.event !== "pull_request") continue;
+    byBranch.set(r.head_branch, [...(byBranch.get(r.head_branch) ?? []), r]);
+  }
+  for (const list of byBranch.values()) {
+    list.sort((a, b) => a.created_at.localeCompare(b.created_at));
+    for (let i = 0; i + 1 < list.length; i++) {
+      const [older, newer] = [list[i]!, list[i + 1]!];
+      if (newer.created_at >= older.updated_at) continue;
+      const stop = new Date(Date.parse(newer.created_at) + 5000).toISOString().replace(".000Z", "Z");
+      older.conclusion = "cancelled";
+      older.updated_at = stop;
+      for (const j of older.jobs) {
+        if (j.completed_at <= stop) continue;
+        j.completed_at = stop < j.started_at ? j.started_at : stop;
+        j.conclusion = "cancelled";
+        for (const st of j.steps) {
+          if (st.completed_at > j.completed_at) st.completed_at = j.completed_at;
+          if (st.started_at > j.completed_at) st.started_at = j.completed_at;
+        }
+      }
+    }
+  }
 }
 
 function billingFor(runs: WRun[], start: number, days: number): World["billing"] {
