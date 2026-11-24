@@ -55,6 +55,10 @@ test("strata are estimated as mean sampled billable x runs; small strata and out
   assert.equal(ci.estimatedBillable, 26.7);
   assert.equal(est.unsampled.runs, 2);
   assert.deepEqual(est.outliers.runs.map((o) => [o.id, o.billable]), [[60, 200]]);
+  assert.deepEqual(est.outliers.uncosted, { runs: 0, wallMinutes: 0 });
+  const capped = estimateBillable({ ...data, runs: [...runs, run(61, "CI", 300)] } as Dataset, config);
+  assert.deepEqual(capped.outliers.uncosted, { runs: 1, wallMinutes: 300 });
+  assert.equal(capped.totals.billableMinutes, 226.7, "an outlier without jobs is reported, not costed as zero");
   assert.equal(est.totals.billableMinutes, 226.7);
   assert.equal(est.totals.usd, 1.36);
 

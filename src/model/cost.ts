@@ -67,7 +67,13 @@ export interface StratumRow {
 export interface Estimate {
   strata: StratumRow[];
   unsampled: { strata: number; runs: number; wallMinutes: number; rows: Array<{ stratum: string; runs: number; wallMinutes: number }> };
-  outliers: { thresholdMinutes: number; runs: Array<{ id: number; workflow: string; event: string; wallMinutes: number; billable: number | null }> };
+  outliers: {
+    thresholdMinutes: number;
+    /** billable is null for outliers whose jobs were not fetched (beyond sampling.maxOutlierRuns). */
+    runs: Array<{ id: number; workflow: string; event: string; wallMinutes: number; billable: number | null }>;
+    /** Outliers without jobs: not in the estimate, reported so the gap is visible. */
+    uncosted: { runs: number; wallMinutes: number };
+  };
   totals: {
     billableMinutes: number;
     roundingWasteMinutes: number;
@@ -142,7 +148,14 @@ export function estimateBillable(data: Dataset, config: Config): Estimate {
       wallMinutes: round(sum(unsampledRows.map((r) => r.wallMinutes)), 1),
       rows: unsampledRows,
     },
-    outliers: { thresholdMinutes: config.outlierMinutes, runs: outlierRuns.sort((a, b) => b.wallMinutes - a.wallMinutes) },
+    outliers: {
+      thresholdMinutes: config.outlierMinutes,
+      runs: outlierRuns.sort((a, b) => b.wallMinutes - a.wallMinutes),
+      uncosted: {
+        runs: outlierRuns.filter((o) => o.billable === null).length,
+        wallMinutes: round(sum(outlierRuns.filter((o) => o.billable === null).map((o) => o.wallMinutes)), 1),
+      },
+    },
     totals: {
       billableMinutes,
       roundingWasteMinutes: round(sum(rows.map((r) => r.estimatedRoundingWaste)) + outlierWaste, 1),
