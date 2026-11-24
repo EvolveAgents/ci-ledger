@@ -1,0 +1,14 @@
+{
+  "name": "ci-ledger",
+  "displayName": "CI Ledger",
+  "version": "0.1.0",
+  "description": "Explains a GitHub Actions bill, merge queue and pull request flow, including coding agents, and ranks fixes by minutes saved.",
+  "author": {
+    "name": "EvolveAgents",
+    "url": "https://github.com/EvolveAgents"
+  },
+  "homepage": "https://github.com/EvolveAgents/ci-ledger",
+  "repository": "https://github.com/EvolveAgents/ci-ledger",
+  "license": "Apache-2.0",
+  "keywords": ["github-actions", "ci", "billing", "merge-queue", "pull-requests", "coding-agents"]
+}

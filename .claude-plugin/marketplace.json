@@ -1,0 +1,15 @@
+{
+  "name": "ci-ledger",
+  "description": "CI Ledger: explains a GitHub Actions bill, merge queue and PR flow, and ranks fixes by minutes saved.",
+  "owner": {
+    "name": "EvolveAgents",
+    "url": "https://github.com/EvolveAgents"
+  },
+  "plugins": [
+    {
+      "name": "ci-ledger",
+      "source": "./plugins/ci-ledger",
+      "description": "Audit a repository's GitHub Actions minutes, merge queue and PR flow, then rank fixes by minutes saved."
+    }
+  ]
+}
