@@ -13,6 +13,7 @@ import {
   workflowFilesSection,
   workflowsSection,
 } from "./core.js";
+import { agentsSection, leadTimeSection, mergeGroupsSection, mergeQueueSection, revisionsSection } from "./flow.js";
 
 /** Bump the major version on breaking changes to metrics.json; findings and the report read it. */
 export const METRICS_SCHEMA_VERSION = "1.0.0";
@@ -83,6 +84,11 @@ export function buildMetrics(data: Dataset, config: Config, now = new Date()) {
     rollups: rollupsSection(ctx),
     billing: billingSection(ctx),
     billable: billableSection(ctx),
+    mergeQueue: mergeQueueSection(ctx),
+    mergeGroups: mergeGroupsSection(ctx),
+    revisions: revisionsSection(ctx),
+    leadTime: leadTimeSection(ctx),
+    agents: agentsSection(ctx),
   };
 }
 
