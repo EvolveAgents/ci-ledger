@@ -4,6 +4,7 @@ import { defaultConfig } from "../src/config.js";
 import { buildMetrics } from "../src/metrics/index.js";
 import { RULES, rank, runFindings } from "../src/findings/index.js";
 import type { Finding } from "../src/findings/types.js";
+import { resolvePath as resolve } from "../src/util/path.js";
 import { syntheticDataset } from "./helpers/dataset.js";
 
 const now = new Date("2026-10-31T01:00:00Z");
@@ -12,10 +13,6 @@ async function doc(config = defaultConfig(), fake = {}) {
   return { m, d: runFindings(m, config, now) };
 }
 
-/** Resolves a metrics.json path such as "workflows[2].sameHeadRetriggers.runs". */
-function resolve(obj: unknown, path: string): unknown {
-  return path.split(/\.|\[(\d+)\]/).filter(Boolean).reduce<unknown>((o, k) => (o == null ? o : (o as Record<string, unknown>)[k]), obj);
-}
 
 test("every rule has a unique id, a title and a description", () => {
   assert.equal(new Set(RULES.map((r) => r.id)).size, RULES.length);
@@ -74,7 +71,7 @@ test("cap forecast needs included minutes and says so when unset", async () => {
 test("without billing, findings drop a confidence level and say the forecast is repo-only", async () => {
   const { d } = await doc({ ...defaultConfig(), billing: { includedMinutes: 3000, spendingLimitUsd: null } }, { billing: false });
   assert.equal(d.modelConfidence, "low");
-  assert.ok(d.findings.every((f) => f.confidence !== "high"));
+  assert.ok(d.findings.filter((f) => f.savings.minutesPer30d > 0).every((f) => f.confidence !== "high"), "minute estimates lose confidence");
   const cap = d.findings.find((f) => f.id === "cap-forecast");
   assert.match(cap?.summary ?? "", /billing unavailable/);
 });

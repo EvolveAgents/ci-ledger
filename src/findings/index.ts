@@ -1,18 +1,37 @@
 import type { Config } from "../config.js";
 import type { Metrics } from "../metrics/index.js";
 import { toolVersion } from "../paths.js";
+import { agentReport } from "./rules/agent-report.js";
 import { capForecast } from "./rules/cap-forecast.js";
+import { conflictHotspots } from "./rules/conflict-hotspots.js";
 import { duplicateSuites } from "./rules/duplicate-suites.js";
 import { failsByDesign } from "./rules/fails-by-design.js";
 import { helperFanout } from "./rules/helper-fanout.js";
+import { leadTimeSplit } from "./rules/lead-time-split.js";
 import { missingCancellation } from "./rules/missing-cancellation.js";
+import { queueEjections } from "./rules/queue-ejections.js";
+import { revisionChurn } from "./rules/revision-churn.js";
 import { roundingWaste } from "./rules/rounding-waste.js";
+import { stalePrs } from "./rules/stale-prs.js";
 import type { Finding, Rule } from "./types.js";
 
 export const FINDINGS_SCHEMA_VERSION = "1.0.0";
 
 /** The v1 catalog, in catalog order. */
-export const RULES: Rule[] = [roundingWaste, helperFanout, duplicateSuites, failsByDesign, capForecast, missingCancellation];
+export const RULES: Rule[] = [
+  roundingWaste,
+  helperFanout,
+  duplicateSuites,
+  failsByDesign,
+  queueEjections,
+  conflictHotspots,
+  revisionChurn,
+  leadTimeSplit,
+  stalePrs,
+  capForecast,
+  missingCancellation,
+  agentReport,
+];
 
 /** Fixes first, by minutes saved per 30 days (then dollars, then id); reports after them. */
 export function rank(findings: Finding[]): Finding[] {
