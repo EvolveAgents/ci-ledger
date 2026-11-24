@@ -103,6 +103,7 @@ export interface Billing {
   reason?: string;
   org: string;
   months: string[];
+  /** Actions items for every month the window touches, whole months, all repositories of the org. */
   items: BillingItem[];
 }
 
