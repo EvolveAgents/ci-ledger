@@ -1,5 +1,5 @@
 import { jobMatchesCheck } from "../model/classify.js";
-import { jobMinutes, repoMatches } from "../model/cost.js";
+import { jobMinutes, repoMatches, SELF_HOSTED, skuFor } from "../model/cost.js";
 import { stratumKey } from "../model/strata.js";
 import type { Run } from "../types.js";
 import { countBy, distribution, groupBy, rate, round, sum, type Distribution } from "../util/stats.js";
@@ -64,6 +64,13 @@ function sameHeadRetriggers(runs: Run[]) {
   return repeats;
 }
 
+/** Run-weighted mean real (unrounded) job minutes per run across the workflow's sampled strata. */
+function meanReal(ctx: Context, workflow: string): number | null {
+  const rows = ctx.estimate.strata.filter((s) => s.workflow === workflow);
+  const runs = sum(rows.map((r) => r.runs));
+  return runs ? round(sum(rows.map((r) => r.meanReal * r.runs)) / runs, 2) : null;
+}
+
 export function workflowsSection(ctx: Context) {
   const rows = [];
   for (const [path, runs] of groupBy(ctx.data.runs, (r) => r.path)) {
@@ -85,8 +92,10 @@ export function workflowsSection(ctx: Context) {
       p90: distribution(walls).p90,
       events: countBy(runs, (r) => r.event),
       linkedRuns: runs.filter((r) => ctx.link.prByRun.has(r.id)).length,
+      defaultBranchRuns: runs.filter((r) => r.headBranch === ctx.data.repo.defaultBranch).length,
       estimatedBillable: round(billableOf(ctx, estimated), 1),
       meanBillable: estimated.length ? round(billableOf(ctx, estimated) / estimated.length, 2) : null,
+      meanReal: meanReal(ctx, runs[0]!.name),
       sameHeadRetriggers: { runs: repeats.length, estimatedBillable: round(billableOf(ctx, repeats), 1) },
       superseded: superseded(ctx, runs),
       failedRunMinutesP50: distribution(runs.filter(failed).map((r) => ctx.wall.get(r.id) ?? 0)).p50,
@@ -109,7 +118,14 @@ export function workflowFilesSection(ctx: Context) {
       helperTriggers: [...new Set([...helperTypes, ...(["workflow_run", "issue_comment"].filter((e) => e in info.triggers))])],
       concurrency: c,
       cancelsSuperseded: c !== null && (c.cancelInProgress === true || typeof c.cancelInProgress === "string"),
-      jobs: info.jobs.map((j) => ({ id: j.id, name: j.name, runsOn: j.runsOn, steps: j.steps, testCommands: j.commands.filter((cmd) => TEST_COMMAND.test(cmd)) })),
+      jobs: info.jobs.map((j) => ({
+        id: j.id,
+        name: j.name,
+        runsOn: j.runsOn,
+        steps: j.steps,
+        commands: j.commands.slice(0, 20),
+        testCommands: j.commands.filter((cmd) => TEST_COMMAND.test(cmd)),
+      })),
       ...(info.parseError ? { parseError: info.parseError } : {}),
     };
   });
@@ -257,13 +273,28 @@ export function billableSection(ctx: Context) {
   // Rounding waste from short jobs, scaled from each stratum's sample to its run count.
   let shortWaste = 0;
   let shortJobsPerWindow = 0;
+  const shortByWorkflow = new Map<string, { workflow: string; jobs: Set<string>; estimatedJobs: number; estimatedWasteMinutes: number }>();
   for (const row of estimate.strata) {
     const ids = sampled.filter(([r]) => stratumKey(r) === row.stratum);
     if (!ids.length) continue;
-    const perRun = ids.map(([, list]) => list.map(jobMinutes).filter((m) => m.real > 0 && m.real * 60 < threshold));
-    shortWaste += (sum(perRun.map((l) => sum(l.map((m) => m.billable - m.real)))) / ids.length) * row.runs;
-    shortJobsPerWindow += (sum(perRun.map((l) => l.length)) / ids.length) * row.runs;
+    const short = ids.map(([, list]) => list.filter((j) => {
+      const m = jobMinutes(j);
+      return m.real > 0 && m.real * 60 < threshold && skuFor(j, config.rates) !== SELF_HOSTED;
+    }));
+    const waste = (sum(short.map((l) => sum(l.map((j) => jobMinutes(j).billable - jobMinutes(j).real)))) / ids.length) * row.runs;
+    const count = (sum(short.map((l) => l.length)) / ids.length) * row.runs;
+    shortWaste += waste;
+    shortJobsPerWindow += count;
+    if (!count) continue;
+    const w = shortByWorkflow.get(row.workflow) ?? { workflow: row.workflow, jobs: new Set<string>(), estimatedJobs: 0, estimatedWasteMinutes: 0 };
+    for (const l of short) for (const j of l) w.jobs.add(j.name);
+    w.estimatedJobs += count;
+    w.estimatedWasteMinutes += waste;
+    shortByWorkflow.set(row.workflow, w);
   }
+  const testSteps = [...steps.values()]
+    .filter((s) => /^Run /.test(s.step) && TEST_COMMAND.test(s.step.slice(4)))
+    .map((s) => ({ workflow: s.workflow, job: s.job, step: s.step, command: s.step.slice(4), n: s.seconds.length, meanSeconds: round(sum(s.seconds) / s.seconds.length, 1) }));
   const allJobs = sampled.flatMap(([, l]) => l).map(jobMinutes).filter((m) => m.real > 0);
   return {
     strata: estimate.strata,
@@ -285,7 +316,11 @@ export function billableSection(ctx: Context) {
       shortShare: rate(allJobs.filter((m) => m.real * 60 < threshold).length, allJobs.length),
       estimatedJobs: round(shortJobsPerWindow, 0),
       estimatedWasteMinutes: round(shortWaste, 1),
+      byWorkflow: [...shortByWorkflow.values()]
+        .map((w) => ({ workflow: w.workflow, jobs: [...w.jobs].sort(), estimatedJobs: round(w.estimatedJobs, 0), estimatedWasteMinutes: round(w.estimatedWasteMinutes, 1) }))
+        .sort((a, b) => b.estimatedWasteMinutes - a.estimatedWasteMinutes),
     },
+    testSteps,
     days: [...new Set(data.runs.map((r) => dayKey(r.createdAt)))].length,
   };
 }
