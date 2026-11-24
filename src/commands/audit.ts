@@ -74,6 +74,10 @@ export async function runAudit(argv: string[]): Promise<number> {
     if (!repo) throw new Error("--repo owner/name is required (or use --fixture)");
     window = resolveWindow(config, { since: values.since, until: values.until });
     if (!values["from-cache"]) {
+      const proxy = process.env.HTTPS_PROXY ?? process.env.https_proxy;
+      if (proxy && process.env.NODE_USE_ENV_PROXY !== "1") {
+        log("HTTPS_PROXY is set, but Node's fetch ignores it unless NODE_USE_ENV_PROXY=1 is set; set it if requests must go through the proxy");
+      }
       const t = await resolveToken();
       token = t.token;
       log(t.token ? `token from ${t.source}` : "no token found: unauthenticated requests are limited to 60 per hour");
