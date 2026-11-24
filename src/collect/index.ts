@@ -53,7 +53,7 @@ export async function collect(options: CollectOptions): Promise<Dataset> {
   const plan = planSample(runs.runs, { ...config.sampling, outlierMinutes: config.outlierMinutes });
   const { jobs, missing } = await collectJobs(gh, cache, repo, [...plan.sampledRunIds, ...plan.outlierRunIds], { offline, log });
   if (missing.length) notes.push(`jobs missing for ${missing.length} sampled runs`);
-  log(`jobs for ${Object.keys(jobs).length} runs (${plan.sampledRunIds.length} sampled, ${plan.outlierRunIds.length} outliers)`);
+  log(`jobs for ${Object.keys(jobs).length} runs (${plan.sampledRunIds.length} sampled, ${plan.outlierRunIds.length} outlier runs)`);
 
   const prs = await collectPrs(gh, cache, repo, window, { offline, rest: options.forceRest, staleDays: config.staleDays, now: options.now, log });
   notes.push(...prs.notes);
