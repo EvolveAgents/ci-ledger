@@ -1,0 +1,34 @@
+{
+  "name": "ci-ledger",
+  "version": "0.1.0",
+  "description": "Explains a GitHub Actions bill, merge queue and pull request flow, and ranks fixes by minutes saved.",
+  "license": "Apache-2.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "ci-ledger": "dist/src/bin.js"
+  },
+  "files": [
+    "dist/src",
+    "config",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "prepare": "npm run build",
+    "test": "npm run build && node --test \"dist/test/**/*.test.js\"",
+    "clean": "rm -rf dist"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/EvolveAgents/ci-ledger.git"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.5",
+    "typescript": "5.9.3"
+  }
+}
