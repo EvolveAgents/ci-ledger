@@ -168,11 +168,11 @@ jobs:
 const HOT_FILES = ["src/registry.ts", "package-lock.json"];
 const OTHER_FILES = ["src/api.ts", "src/cli.ts", "src/db.ts", "src/ui/app.tsx", "src/ui/table.tsx", "docs/guide.md", "test/api.test.ts", "src/util.ts"];
 const AGENTS = [
-  { prefix: "codex/", author: "dev-ana", share: 0.3, rework: 1 },
-  { prefix: "claude/", author: "dev-ben", share: 0.25, rework: 1 },
+  { prefix: "codex/", author: "dev-a", share: 0.3, rework: 1 },
+  { prefix: "claude/", author: "dev-b", share: 0.25, rework: 1 },
   { prefix: "copilot/", author: "Copilot", share: 0.1, rework: 2 },
   { prefix: "dependabot/npm_and_yarn/", author: "dependabot[bot]", share: 0.1, rework: 0, bot: true },
-  { prefix: "feature/", author: "dev-cy", share: 0.25, rework: 0 },
+  { prefix: "feature/", author: "dev-c", share: 0.25, rework: 0 },
 ];
 const HUMAN_REVIEWERS = ["reviewer-a", "reviewer-b", "reviewer-c"];
 
@@ -229,7 +229,7 @@ export function buildWorld(options: WorldOptions = {}): World {
     const run: WRun = { id, workflow_id: Object.keys(WORKFLOWS).indexOf(key) + 100, name: wf.name, display_title: o.title ?? `${wf.name} on ${branch}`,
       path: wf.path, event, status: "completed", conclusion, head_branch: branch, head_sha: headSha, run_attempt: rerun ? 2 : 1,
       created_at: iso(at), run_started_at: iso(at), updated_at: iso(t + 4000),
-      actor: { login: o.actor ?? "dev-cy" }, triggering_actor: { login: o.actor ?? "dev-cy" },
+      actor: { login: o.actor ?? "dev-c" }, triggering_actor: { login: o.actor ?? "dev-c" },
       pull_requests: (o.prs ?? []).map((number) => ({ number, base: { repo: { id: repoId } } })),
       repository: { id: repoId }, jobs, earlierAttemptMinutes: earlier };
     runs.push(run);
@@ -327,11 +327,11 @@ export function buildWorld(options: WorldOptions = {}): World {
     const created = start - (40 + i * 6) * 86_400_000;
     prs.push({ number: 200 + i, state: "open", draft: i === 0, created_at: iso(created), updated_at: iso(created + 5 * 86_400_000),
       closed_at: null, merged_at: null, base: "main", head: `feature/old-${i}`, head_sha: sha(), additions: 300 + i * 50, deletions: 20,
-      author: { login: "dev-cy", bot: false }, events: [{ type: "commit", at: iso(created), sha: sha(), headline: "Start" }], files: [], behind_by: 60 + i * 9 });
+      author: { login: "dev-c", bot: false }, events: [{ type: "commit", at: iso(created), sha: sha(), headline: "Start" }], files: [], behind_by: 60 + i * 9 });
   }
   for (let d = 0; d < days; d++) {
     const day = start + d * 86_400_000;
-    addRun("nightly", "schedule", "main", sha(), day + 3 * 3_600_000, { actor: "dev-cy", force: d === 11 ? 360 : undefined });
+    addRun("nightly", "schedule", "main", sha(), day + 3 * 3_600_000, { actor: "dev-c", force: d === 11 ? 360 : undefined });
     if (d % 3 === 0) addRun("dependabot", "dynamic", "main", sha(), day + 6 * 3_600_000, { actor: "dependabot[bot]" });
   }
   const inWindow = runs.filter((x) => Date.parse(x.created_at) >= start && Date.parse(x.created_at) < end);
