@@ -82,9 +82,29 @@ test("GraphQL timelines are batched, paged and mapped; conflict ejections get fi
   fetch.calls.length = 0;
   await collectPrs(new GitHubClient({ fetch, token: "t" }), cache, repo, window, { now });
   assert.equal(fetch.calls.filter((c) => c.startsWith("POST /graphql")).length, 0, "unchanged PRs come from the cache");
+  assert.equal(fetch.calls.filter((c) => c.includes("/compare/")).length, 1, "idle open PRs get a fresh behind-base count");
 
   const offline = await collectPrs(new GitHubClient({ fetch: routes({}) }), cache, repo, window, { offline: true });
   assert.equal(offline.prs.length, 3);
+});
+
+test("a GraphQL error inside one batch falls back to REST for that batch only", async () => {
+  let calls = 0;
+  const fetch = routes({
+    "GET /repos/acme/widgets/pulls": () => [{ number: 5, updated_at: "2026-03-10T00:00:00Z" }],
+    "POST /graphql": () => (++calls, { errors: [{ message: "Something went wrong" }] }),
+    "GET /repos/acme/widgets/pulls/5": () => ({
+      number: 5, state: "open", created_at: "2026-03-01T00:00:00Z", updated_at: "2026-03-10T00:00:00Z", closed_at: null, merged_at: null,
+      base: { ref: "main" }, head: { ref: "x", sha: "abc" }, additions: 1, deletions: 1, user: { login: "dev" },
+    }),
+    "GET /repos/acme/widgets/issues/5/timeline": () => [],
+    "GET /repos/acme/widgets/pulls/5/commits": () => [],
+    "GET /repos/acme/widgets/pulls/5/reviews": () => [],
+  });
+  const result = await collectPrs(new GitHubClient({ fetch, token: "t" }), tmpCache(), repo, window, { now });
+  assert.equal(result.prs[0]?.source, "rest");
+  assert.match(result.notes[0] ?? "", /error on one batch/);
+  assert.equal(calls, 1);
 });
 
 test("REST timeline, commits and reviews are used when GraphQL is blocked", async () => {

@@ -250,7 +250,7 @@ export interface PrOptions {
 
 export interface PrResult {
   prs: PullRequest[];
-  source: "graphql" | "rest" | "cache";
+  source: "graphql" | "rest" | "mixed" | "cache";
   notes: string[];
 }
 
@@ -275,27 +275,65 @@ export async function collectPrs(
   log(`${listed.length} PRs in scope, ${stale.length} to fetch`);
 
   let mode: "graphql" | "rest" = options.rest ? "rest" : "graphql";
+  const used = new Set<"graphql" | "rest">();
+  let graphqlErrors = 0;
   for (let i = 0; i < stale.length; ) {
     const batch = stale.slice(i, i + (mode === "graphql" ? 10 : 4)).map((l) => l.number);
-    let fetched: PullRequest[];
+    let fetched: PullRequest[] | null = null;
     if (mode === "graphql") {
       try {
         fetched = await fetchGraphql(gh, repo, batch);
+        used.add("graphql");
+        graphqlErrors = 0;
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        notes.push(`GraphQL unavailable (${msg.slice(0, 120)}); used the REST timeline instead`);
-        log("GraphQL failed; falling back to REST for PR timelines");
-        mode = "rest";
-        continue;
+        // An HTTP-level refusal (401/403/...) means GraphQL is blocked for this token or network: switch
+        // for the rest of the run. A GraphQL-level error (HTTP 200 with errors) only costs this batch,
+        // unless it keeps happening.
+        const blocked = !(err instanceof GitHubError && err.status === 200) || ++graphqlErrors >= 3;
+        notes.push(`GraphQL ${blocked ? "unavailable" : "error on one batch"} (${msg.slice(0, 120)}); used the REST timeline ${blocked ? "instead" : "for that batch"}`);
+        if (blocked) {
+          log("GraphQL failed; falling back to REST for PR timelines");
+          mode = "rest";
+          continue;
+        }
       }
-    } else {
+    }
+    if (!fetched) {
       fetched = await mapLimit(batch, 4, (n) => fetchRest(gh, repo, n));
+      used.add("rest");
     }
     for (const pr of fetched) cache.write(`prs/${pr.number}.json`, await enrich(gh, repo, pr, options));
     i += batch.length;
   }
+  // Unchanged open PRs still drift behind their base; refresh behind-base counts for idle ones.
+  const fresh = new Set(stale.map((l) => l.number));
+  for (const l of listed) {
+    if (fresh.has(l.number)) continue;
+    const cached = cache.read<PullRequest>(`prs/${l.number}.json`);
+    if (cached && isIdleOpen(cached, options)) cache.write(`prs/${l.number}.json`, await refreshBehind(gh, repo, cached));
+  }
   const prs = listed.map((l) => cache.read<PullRequest>(`prs/${l.number}.json`)).filter((p): p is PullRequest => !!p);
-  return { prs, source: mode, notes };
+  const source = used.size > 1 ? "mixed" : used.size === 1 ? [...used][0]! : mode;
+  return { prs, source, notes };
+}
+
+function isIdleOpen(pr: PullRequest, options: PrOptions): boolean {
+  const idleDays = ((options.now ?? new Date()).getTime() - Date.parse(pr.updatedAt)) / 86_400_000;
+  return pr.state === "open" && idleDays >= (options.staleDays ?? 14);
+}
+
+async function refreshBehind(gh: GitHubClient, repo: RepoInfo, pr: PullRequest): Promise<PullRequest> {
+  try {
+    const { data } = await gh.request<{ behind_by: number }>(
+      `/repos/${repo.owner}/${repo.name}/compare/${encodeURIComponent(pr.baseRef)}...${pr.headSha}?per_page=1`,
+    );
+    pr.behindBy = data.behind_by;
+  } catch (err) {
+    if (!(err instanceof GitHubError)) throw err;
+    pr.behindBy = null;
+  }
+  return pr;
 }
 
 /** Adds changed files to PRs removed from the queue for a conflict, and behind-base counts to idle open PRs. */
@@ -310,17 +348,5 @@ async function enrich(gh: GitHubClient, repo: RepoInfo, pr: PullRequest, options
       if (!(err instanceof GitHubError)) throw err;
     }
   }
-  const idleDays = ((options.now ?? new Date()).getTime() - Date.parse(pr.updatedAt)) / 86_400_000;
-  if (pr.state === "open" && idleDays >= (options.staleDays ?? 14)) {
-    try {
-      const { data } = await gh.request<{ behind_by: number }>(
-        `${base}/compare/${encodeURIComponent(pr.baseRef)}...${pr.headSha}?per_page=1`,
-      );
-      pr.behindBy = data.behind_by;
-    } catch (err) {
-      if (!(err instanceof GitHubError)) throw err;
-      pr.behindBy = null;
-    }
-  }
-  return pr;
+  return isIdleOpen(pr, options) ? refreshBehind(gh, repo, pr) : pr;
 }
