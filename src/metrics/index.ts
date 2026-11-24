@@ -49,6 +49,7 @@ function modelSection(ctx: Context) {
     selfHostedMinutes: estimate.totals.selfHostedMinutes,
     unpricedMinutes: estimate.totals.unpricedMinutes,
     unsampledRuns: estimate.unsampled.runs,
+    uncostedOutlierRuns: estimate.outliers.uncosted.runs,
     privateRepo: data.repo.private,
     currency: config.rates.currency,
     ratesEffective: config.rates.effective ?? null,

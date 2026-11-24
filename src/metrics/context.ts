@@ -13,7 +13,7 @@ export interface Context {
   link: LinkResult;
   estimate: Estimate;
   comparison: BillingComparison;
-  /** Estimated billable minutes per run: its stratum mean, or exact for outliers. Unsampled strata are absent. */
+  /** Estimated billable minutes per run: its stratum share, or exact for outliers. Unsampled strata and uncosted outliers are absent. */
   perRunBillable: Map<number, number>;
   wall: Map<number, number>;
   workflowInfo: Map<string, WorkflowInfo>;
@@ -45,7 +45,7 @@ export function buildContext(data: Dataset, config: Config, now: Date): Context 
     const mean = meanByStratum.get(stratum);
     if (mean !== undefined) for (const id of ids) perRunBillable.set(id, mean);
   }
-  for (const o of estimate.outliers.runs) perRunBillable.set(o.id, o.billable ?? 0);
+  for (const o of estimate.outliers.runs) if (o.billable !== null) perRunBillable.set(o.id, o.billable);
 
   const workflowInfo = new Map(data.workflows.map((w) => [w.path, parseWorkflow(w)]));
   const requiredPaths = new Set<string>();
