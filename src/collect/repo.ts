@@ -64,6 +64,12 @@ export async function collectWorkflows(
   return files;
 }
 
+/** First 160 characters of an error message, for notes. */
+function brief(err: unknown): string {
+  const msg = err instanceof Error ? err.message : String(err);
+  return msg.length > 160 ? `${msg.slice(0, 157)}...` : msg;
+}
+
 interface ApiRule {
   type: string;
   parameters?: { required_status_checks?: Array<{ context: string }> };
@@ -99,7 +105,7 @@ export async function collectSetup(gh: GitHubClient, cache: Cache, repo: RepoInf
       .flatMap((r) => r.parameters?.required_status_checks?.map((c) => c.context) ?? []);
     if (requiredChecks.length) source = "rulesets";
   } catch (err) {
-    notes.push(`rulesets: ${err instanceof Error ? err.message : String(err)}`);
+    notes.push(`rulesets: ${brief(err)}`);
   }
 
   if (source === "none") {
@@ -114,7 +120,7 @@ export async function collectSetup(gh: GitHubClient, cache: Cache, repo: RepoInf
         // no classic protection on this branch
       } else {
         source = "unavailable";
-        notes.push(`branch protection: ${err instanceof Error ? err.message : String(err)} (needs Administration: read)`);
+        notes.push(`branch protection: ${brief(err)} (needs Administration: read)`);
       }
     }
   }
@@ -127,7 +133,7 @@ export async function collectSetup(gh: GitHubClient, cache: Cache, repo: RepoInf
       );
       mergeQueue = data.repository?.mergeQueue != null;
     } catch (err) {
-      notes.push(`merge queue lookup: ${err instanceof Error ? err.message : String(err)}`);
+      notes.push(`merge queue lookup: ${brief(err)}`);
     }
   }
 
