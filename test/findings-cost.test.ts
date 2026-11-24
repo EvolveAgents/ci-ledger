@@ -78,3 +78,18 @@ test("without billing, findings drop a confidence level and say the forecast is 
   const cap = d.findings.find((f) => f.id === "cap-forecast");
   assert.match(cap?.summary ?? "", /billing unavailable/);
 });
+
+test("folding short jobs saves the separate round-ups and their setup steps, and nothing for single-job runs", async () => {
+  const { foldSavings } = await import("../src/metrics/core.js");
+  const t = (s: number) => new Date(Date.UTC(2026, 0, 1) + s * 1000).toISOString();
+  const job = (name: string, seconds: number, setupSeconds = 0) => ({
+    id: 1, runId: 1, name, status: "completed", conclusion: "success", createdAt: t(0), startedAt: t(0), completedAt: t(seconds),
+    labels: ["ubuntu-latest"], runnerGroup: null,
+    steps: setupSeconds ? [{ name: "Set up job", conclusion: "success", startedAt: t(0), completedAt: t(setupSeconds) }] : [],
+  });
+  const fold = foldSavings(60);
+  assert.equal(fold([job("only", 20)]), 0);
+  assert.equal(fold([job("lint", 32, 13), job("typecheck", 45, 13), job("build", 170), job("test", 330)]), 1);
+  assert.equal(fold([job("a", 20), job("b", 20)]), 1);
+  assert.equal(fold([job("build", 170), job("test", 330)]), 0);
+});

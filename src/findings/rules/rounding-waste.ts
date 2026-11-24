@@ -5,12 +5,15 @@ export const roundingWaste: Rule = {
   id: "rounding-waste",
   title: "Short jobs billed as whole minutes",
   description:
-    "GitHub bills every job rounded up to a whole minute, so a 20-second job costs a full minute. Flags workflows whose sampled jobs often finish in under the short-job threshold (60 s by default).",
+    "GitHub bills every job rounded up to a whole minute, so a 20-second job costs a full minute. Flags workflows whose runs have short jobs (under 60 s by default) next to other jobs, and computes, from the sampled runs, what folding them into one job would save.",
   detect(m) {
     const s = m.billable.shortJobs;
-    const rows = s.byWorkflow.filter((w) => w.estimatedWasteMinutes >= 5);
+    const rows = s.byWorkflow.filter((w) => w.estimatedFoldSavingsMinutes >= 5);
     if (!rows.length) {
-      return { status: "not-triggered", reason: `${s.shortJobs} of ${s.sampledJobs} sampled jobs ran under ${s.thresholdSeconds}s; waste below 5 minutes per workflow` };
+      return {
+        status: "not-triggered",
+        reason: `${s.shortJobs} of ${s.sampledJobs} sampled jobs ran under ${s.thresholdSeconds}s, but folding them into other jobs of the same run saves under 5 minutes per workflow (single-job runs have nothing to fold into)`,
+      };
     }
     return {
       status: "findings",
@@ -24,13 +27,14 @@ export const roundingWaste: Rule = {
           title: `Fold short jobs in "${w.workflow}" into one job`,
           kind: "fix" as const,
           subject: w.workflow,
-          summary: `About ${w.estimatedJobs} jobs in "${w.workflow}" (${w.jobs.join(", ")}) ran under ${s.thresholdSeconds}s in the window, and rounding each up to a minute billed ~${w.estimatedWasteMinutes} minutes of idle time.`,
+          summary: `About ${w.estimatedJobs} jobs in "${w.workflow}" (${w.jobs.join(", ")}) ran under ${s.thresholdSeconds}s in the window. Each bills a whole minute plus its own setup; folding them into another job of the same run saves ~${w.estimatedFoldSavingsMinutes} minutes.`,
           evidence: [
             ev("Short jobs (est.)", w.estimatedJobs, `billable.shortJobs.byWorkflow[${i}].estimatedJobs`),
-            ev("Rounding waste, window (min)", w.estimatedWasteMinutes, `billable.shortJobs.byWorkflow[${i}].estimatedWasteMinutes`),
+            ev("Rounding waste of those jobs, window (min)", w.estimatedWasteMinutes, `billable.shortJobs.byWorkflow[${i}].estimatedWasteMinutes`),
+            ev("Saved by folding, window (min)", w.estimatedFoldSavingsMinutes, `billable.shortJobs.byWorkflow[${i}].estimatedFoldSavingsMinutes`),
             ev("Short share of all sampled jobs", s.shortShare, "billable.shortJobs.shortShare"),
           ],
-          savings: savings(m, w.estimatedWasteMinutes, "Rounding waste of the short jobs, scaled from the job sample to every run; folding them into one job leaves their real seconds but bills one round-up instead of several."),
+          savings: savings(m, w.estimatedFoldSavingsMinutes, "Per sampled run: billed minutes of the short jobs and their new parent job, minus one round-up of the combined time without the folded jobs' setup steps; scaled to every run."),
           confidence: withModel(m, "medium"),
           fix: {
             summary: `Run ${w.jobs.join(", ")} as steps of an existing job instead of separate jobs.`,
