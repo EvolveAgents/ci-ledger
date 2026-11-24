@@ -1,4 +1,5 @@
 import { auditCommand } from "./commands/audit.js";
+import { mcpCommand } from "./commands/mcp.js";
 import { explainCommand, findingsCommand } from "./commands/read.js";
 import { toolVersion } from "./paths.js";
 
@@ -9,7 +10,7 @@ export interface Command {
   run(argv: string[]): Promise<number>;
 }
 
-export const commands: Command[] = [auditCommand, findingsCommand, explainCommand];
+export const commands: Command[] = [auditCommand, findingsCommand, explainCommand, mcpCommand];
 
 function helpText(): string {
   const width = Math.max(...commands.map((c) => c.name.length), 8);

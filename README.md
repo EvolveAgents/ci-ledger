@@ -55,6 +55,7 @@ Open `ci-ledger-report/report.html` in a browser. It is one self-contained file 
 | `ci-ledger audit --repo owner/name` | Collects data and writes `metrics.json`, `findings.json` and `report.html`. |
 | `ci-ledger findings` | Prints the ranked findings from the last audit. `--json` prints them as JSON. |
 | `ci-ledger explain <id>` | Shows a finding's evidence (with `metrics.json` paths), the savings basis, the fix and a YAML sketch. A rule id lists its findings or says why it found nothing. |
+| `ci-ledger mcp` | Serves the last audit to MCP clients over stdio (see below). |
 
 `audit` options:
 
@@ -176,6 +177,23 @@ Put a `ci-ledger.config.json` in the working directory, or pass `--config`. Obje
 - `workflowGroups`: the first matching rule wins, and a rule matches when any of its criteria match. Workflows that match none are `other`.
 - `billing.includedMinutes` and `spendingLimitUsd` feed `cap-forecast`. The billing API does not report them.
 
+## MCP server
+
+`ci-ledger mcp [--out dir]` is a minimal Model Context Protocol server over stdio. It reads `metrics.json` and `findings.json` from the last audit on every call, so a new audit shows up without a restart. It makes no network calls.
+
+| Tool | Returns |
+| --- | --- |
+| `get_summary` | Window, estimate vs billing, model error and confidence, savings totals, top fixes |
+| `get_metric` | Any value in `metrics.json` by path, such as `model.errorPct` or `revisions.bySize["1200+"]` |
+| `list_findings` | Ranked findings (optionally only fixes or reports), plus skipped rules |
+| `explain_finding` | Evidence, savings basis, fix and YAML sketch for a finding or rule id |
+
+It speaks MCP protocol revisions 2024-11-05 through 2025-11-25. To add it to Claude Code:
+
+```bash
+claude mcp add ci-ledger -- npx --yes github:EvolveAgents/ci-ledger mcp --out /absolute/path/to/ci-ledger-report
+```
+
 ## Plugins
 
 `plugins/ci-ledger` is one plugin for both Claude Code (`.claude-plugin/plugin.json`) and Codex (`.codex-plugin/plugin.json`). The two share `skills/`. The `audit` skill runs the CLI and walks through the results; `fix`, `watch` and `agents` are stubs for now.
@@ -210,6 +228,7 @@ npm test
 | `src/metrics` | `metrics.json` sections |
 | `src/findings` | The rule catalog, one module per rule |
 | `src/report` | Text summaries and `report.html` |
+| `src/mcp` | The stdio MCP server |
 | `plugins/ci-ledger` | Claude Code and Codex plugin |
 
 ## License

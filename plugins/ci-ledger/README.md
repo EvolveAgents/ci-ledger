@@ -18,6 +18,10 @@ Claude Code and Codex plugin for [CI Ledger](../../README.md). It runs `npx ci-l
 
 Then run `/ci-ledger:audit owner/name`.
 
+## MCP server
+
+The CLI also ships an MCP server (`ci-ledger mcp`) over the last audit's outputs. The plugin does not declare it yet: an `.mcp.json` entry that runs `npx ci-ledger mcp` only works once the package is on npm. Until then, add it by hand (see the main README).
+
 ## Manifests
 
 - Claude Code: `.claude-plugin/plugin.json`, listed in the repository's `.claude-plugin/marketplace.json`.
