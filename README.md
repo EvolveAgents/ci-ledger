@@ -105,7 +105,12 @@ Some tokens and proxies block GraphQL. CI Ledger then switches to the REST timel
 4. When billing usage is available, the estimate is compared with the actual minutes for that repository and window, and the error in % is on page one.
 5. Prices come from [`config/rates.json`](config/rates.json), not from code. It ships with Linux 2-core at $0.006 a minute (GitHub's list price since 2026-01-01). Add rows for the other runner types you use, or they are counted as unpriced. Public repositories use standard runners for free.
 
-Known limits: jobs come from `filter=latest`, so earlier attempts of re-run workflows are not in the estimate. Required-check failure rates come from sampled jobs.
+Known limits:
+
+- Jobs come from `filter=latest`, so earlier attempts of re-run workflows are not in the estimate.
+- A cached day is final once it is in the past and all its runs have completed, and a cached run's jobs are kept. A workflow re-run after that is not picked up unless you delete `.ci-ledger-cache/`.
+- Outliers beyond `sampling.maxOutlierRuns` (50) have no jobs fetched. They are reported as uncosted rather than estimated.
+- Required-check failure rates come from sampled jobs.
 
 ## Findings catalog (v1)
 
