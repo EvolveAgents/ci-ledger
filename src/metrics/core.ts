@@ -1,7 +1,7 @@
 import { jobMatchesCheck } from "../model/classify.js";
-import { jobMinutes, repoMatches } from "../model/cost.js";
+import { jobMinutes, repoMatches, SELF_HOSTED, skuFor } from "../model/cost.js";
 import { stratumKey } from "../model/strata.js";
-import type { Run } from "../types.js";
+import type { Job, Run } from "../types.js";
 import { countBy, distribution, groupBy, rate, round, sum, type Distribution } from "../util/stats.js";
 import { dayKey, minutesBetween, monthKey, weekKey } from "../util/time.js";
 import { PR_EVENTS, billableOf, wallOf, type Context } from "./context.js";
@@ -64,6 +64,13 @@ function sameHeadRetriggers(runs: Run[]) {
   return repeats;
 }
 
+/** Run-weighted mean real (unrounded) job minutes per run across the workflow's sampled strata. */
+function meanReal(ctx: Context, workflow: string): number | null {
+  const rows = ctx.estimate.strata.filter((s) => s.workflow === workflow);
+  const runs = sum(rows.map((r) => r.runs));
+  return runs ? round(sum(rows.map((r) => r.meanReal * r.runs)) / runs, 2) : null;
+}
+
 export function workflowsSection(ctx: Context) {
   const rows = [];
   for (const [path, runs] of groupBy(ctx.data.runs, (r) => r.path)) {
@@ -85,8 +92,10 @@ export function workflowsSection(ctx: Context) {
       p90: distribution(walls).p90,
       events: countBy(runs, (r) => r.event),
       linkedRuns: runs.filter((r) => ctx.link.prByRun.has(r.id)).length,
+      defaultBranchRuns: runs.filter((r) => r.headBranch === ctx.data.repo.defaultBranch).length,
       estimatedBillable: round(billableOf(ctx, estimated), 1),
       meanBillable: estimated.length ? round(billableOf(ctx, estimated) / estimated.length, 2) : null,
+      meanReal: meanReal(ctx, runs[0]!.name),
       sameHeadRetriggers: { runs: repeats.length, estimatedBillable: round(billableOf(ctx, repeats), 1) },
       superseded: superseded(ctx, runs),
       failedRunMinutesP50: distribution(runs.filter(failed).map((r) => ctx.wall.get(r.id) ?? 0)).p50,
@@ -109,7 +118,14 @@ export function workflowFilesSection(ctx: Context) {
       helperTriggers: [...new Set([...helperTypes, ...(["workflow_run", "issue_comment"].filter((e) => e in info.triggers))])],
       concurrency: c,
       cancelsSuperseded: c !== null && (c.cancelInProgress === true || typeof c.cancelInProgress === "string"),
-      jobs: info.jobs.map((j) => ({ id: j.id, name: j.name, runsOn: j.runsOn, steps: j.steps, testCommands: j.commands.filter((cmd) => TEST_COMMAND.test(cmd)) })),
+      jobs: info.jobs.map((j) => ({
+        id: j.id,
+        name: j.name,
+        runsOn: j.runsOn,
+        steps: j.steps,
+        commands: j.commands.slice(0, 20),
+        testCommands: j.commands.filter((cmd) => TEST_COMMAND.test(cmd)),
+      })),
       ...(info.parseError ? { parseError: info.parseError } : {}),
     };
   });
@@ -254,16 +270,32 @@ export function billableSection(ctx: Context) {
     shortShare: rate(j.seconds.filter((s) => s > 0 && s < threshold).length, j.seconds.length),
   })).sort((a, b) => a.workflow.localeCompare(b.workflow) || a.job.localeCompare(b.job));
 
-  // Rounding waste from short jobs, scaled from each stratum's sample to its run count.
+  // Rounding waste from short jobs, and what folding them into another job of the same run would save,
+  // both scaled from each stratum's sample to its run count.
   let shortWaste = 0;
   let shortJobsPerWindow = 0;
+  const shortByWorkflow = new Map<string, { workflow: string; jobs: Set<string>; estimatedJobs: number; estimatedWasteMinutes: number; estimatedFoldSavingsMinutes: number }>();
   for (const row of estimate.strata) {
     const ids = sampled.filter(([r]) => stratumKey(r) === row.stratum);
     if (!ids.length) continue;
-    const perRun = ids.map(([, list]) => list.map(jobMinutes).filter((m) => m.real > 0 && m.real * 60 < threshold));
-    shortWaste += (sum(perRun.map((l) => sum(l.map((m) => m.billable - m.real)))) / ids.length) * row.runs;
-    shortJobsPerWindow += (sum(perRun.map((l) => l.length)) / ids.length) * row.runs;
+    const hostedJobs = ids.map(([, list]) => list.filter((j) => jobMinutes(j).real > 0 && skuFor(j, config.rates) !== SELF_HOSTED));
+    const short = hostedJobs.map((l) => l.filter((j) => jobMinutes(j).real * 60 < threshold));
+    const waste = (sum(short.map((l) => sum(l.map((j) => jobMinutes(j).billable - jobMinutes(j).real)))) / ids.length) * row.runs;
+    const count = (sum(short.map((l) => l.length)) / ids.length) * row.runs;
+    const fold = (sum(hostedJobs.map(foldSavings(threshold))) / ids.length) * row.runs;
+    shortWaste += waste;
+    shortJobsPerWindow += count;
+    if (!count) continue;
+    const w = shortByWorkflow.get(row.workflow) ?? { workflow: row.workflow, jobs: new Set<string>(), estimatedJobs: 0, estimatedWasteMinutes: 0, estimatedFoldSavingsMinutes: 0 };
+    for (const l of short) for (const j of l) w.jobs.add(j.name);
+    w.estimatedJobs += count;
+    w.estimatedWasteMinutes += waste;
+    w.estimatedFoldSavingsMinutes += fold;
+    shortByWorkflow.set(row.workflow, w);
   }
+  const testSteps = [...steps.values()]
+    .filter((s) => /^Run /.test(s.step) && TEST_COMMAND.test(s.step.slice(4)))
+    .map((s) => ({ workflow: s.workflow, job: s.job, step: s.step, command: s.step.slice(4), n: s.seconds.length, meanSeconds: round(sum(s.seconds) / s.seconds.length, 1) }));
   const allJobs = sampled.flatMap(([, l]) => l).map(jobMinutes).filter((m) => m.real > 0);
   return {
     strata: estimate.strata,
@@ -285,8 +317,42 @@ export function billableSection(ctx: Context) {
       shortShare: rate(allJobs.filter((m) => m.real * 60 < threshold).length, allJobs.length),
       estimatedJobs: round(shortJobsPerWindow, 0),
       estimatedWasteMinutes: round(shortWaste, 1),
+      byWorkflow: [...shortByWorkflow.values()]
+        .map((w) => ({
+          workflow: w.workflow,
+          jobs: [...w.jobs].sort(),
+          estimatedJobs: round(w.estimatedJobs, 0),
+          estimatedWasteMinutes: round(w.estimatedWasteMinutes, 1),
+          estimatedFoldSavingsMinutes: round(w.estimatedFoldSavingsMinutes, 1),
+        }))
+        .sort((a, b) => b.estimatedFoldSavingsMinutes - a.estimatedFoldSavingsMinutes || b.estimatedWasteMinutes - a.estimatedWasteMinutes),
     },
+    testSteps,
     days: [...new Set(data.runs.map((r) => dayKey(r.createdAt)))].length,
+  };
+}
+
+const OVERHEAD_STEP = /^(Set up job|Complete job|Post |Run actions\/(checkout|setup-\w+|cache)@)/;
+
+/**
+ * Billable minutes one run saves when its short jobs become steps of its longest other job (or of one
+ * job, if all are short): the separate round-ups go away, and so does each folded job's setup overhead
+ * (set up, checkout, setup-*, cache and post steps). Zero for runs with a single job.
+ */
+export function foldSavings(thresholdSeconds: number) {
+  return (jobs: readonly Job[]): number => {
+    if (jobs.length < 2) return 0;
+    const real = (j: Job) => jobMinutes(j).real;
+    const short = jobs.filter((j) => real(j) * 60 < thresholdSeconds);
+    if (!short.length) return 0;
+    const overhead = (j: Job) => sum(j.steps.filter((s) => OVERHEAD_STEP.test(s.name)).map((s) => minutesBetween(s.startedAt, s.completedAt) ?? 0));
+    const others = jobs.filter((j) => !short.includes(j)).sort((a, b) => real(b) - real(a));
+    const parent = others[0] ?? short[0]!;
+    const folded = short.filter((j) => j !== parent);
+    if (!folded.length) return 0;
+    const before = sum([parent, ...folded].map((j) => jobMinutes(j).billable));
+    const after = Math.ceil(real(parent) + sum(folded.map((j) => Math.max(0, real(j) - overhead(j)))) - 1e-9);
+    return Math.max(0, before - after);
   };
 }
 
